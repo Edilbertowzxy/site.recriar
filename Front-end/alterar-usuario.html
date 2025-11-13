@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Alterar Usuário</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="common.js" defer></script>
+    <link rel="shortcut icon" href="logo.png" type="image/x-icon">
+</head>
+<body>
+    <!-- Menu via JS -->
+    <div id="menu-container"></div>
+
+    <main>
+        <div class="container">
+            <h2>Alterar Usuário</h2>
+            <div id="feedback-message" class="feedback-message" style="display: none;"></div>
+
+            <form id="form-alterar-usuario">
+                <div class="form-group">
+                    <label for="nome">Nome</label>
+                    <input type="text" id="nome" name="nome" required disabled>
+                    <span id="nome-error" class="error-message"></span>
+                </div>
+                <div class="form-group">
+                    <label for="email">E-mail</label>
+                    <input type="email" id="email" name="email" required disabled>
+                    <span id="email-error" class="error-message"></span>
+                </div>
+
+                <!-- O campo 'tipo' não é alterável via PUT /api/user/profile, mas pode ser relevante para exibição ou para um PUT /api/admin/user/{id} -->
+                <!-- Por enquanto, vamos considerar apenas email para /api/user/profile -->
+                <!-- Se houver um endpoint para admin alterar tipo de usuário, este campo seria habilitado -->
+                <!--
+                <div class="form-group">
+                    <label for="tipo">Tipo de Usuário</label>
+                    <select id="tipo" name="tipo" required disabled>
+                        <option value="ADMIN">Admin</option>
+                        <option value="PROFESSOR">Professor</option>
+                    </select>
+                    <span id="tipo-error" class="error-message"></span>
+                </div>
+                -->
+
+                <div class="form-actions">
+                    <button type="button" onclick="window.history.back()">Voltar</button>
+                    <button type="button" id="btn-editar">Editar</button>
+                    <button type="submit" id="btn-salvar" style="display: none;">Salvar Alterações</button>
+                </div>
+            </form>
+
+            <h3 style="margin-top: 2rem;">Alterar Senha</h3>
+            <form id="form-alterar-senha">
+                <div class="form-group">
+                    <label for="current_password">Senha Atual</label>
+                    <input type="password" id="current_password" name="current_password" required>
+                    <span id="current_password-error" class="error-message"></span>
+                </div>
+                <div class="form-group">
+                    <label for="new_password">Nova Senha</label>
+                    <input type="password" id="new_password" name="new_password" required>
+                    <span id="new_password-error" class="error-message"></span>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_new_password">Confirmar Nova Senha</label>
+                    <input type="password" id="confirm_new_password" name="confirm_new_password" required>
+                    <span id="confirm_new_password-error" class="error-message"></span>
+                </div>
+                <div class="form-actions">
+                    <button type="submit">Alterar Senha</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="menu.js" defer></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            // Verifica se o usuário está autenticado pelo padrão do sistema
+            if (!Auth.isLoggedIn()) {
+                Auth.logout();
+                return;
+            }
+
+            // Pega o id e token do usuário do sessionStorage
+            const userId = sessionStorage.getItem('user_id');
+            const token = sessionStorage.getItem('auth_token');
+            if (!userId || !token) {
+                Auth.logout();
+                return;
+            }
+
+            carregarDadosUsuario(userId);
+
+            const btnEditar = document.getElementById("btn-editar");
+            const btnSalvar = document.getElementById("btn-salvar");
+            const inputNome = document.getElementById("nome");
+            const inputEmail = document.getElementById("email");
+            
+            // Configurar botão de editar
+            if (btnEditar) {
+                btnEditar.addEventListener("click", function() {
+                    // Habilita edição
+                    inputNome.disabled = false;
+                    inputEmail.disabled = false;
+                    btnEditar.style.display = "none";
+                    btnSalvar.style.display = "inline-block";
+                });
+            }
+
+            const formAlterarUsuario = document.getElementById("form-alterar-usuario");
+            if (formAlterarUsuario) {
+                formAlterarUsuario.addEventListener("submit", function(e){
+                    e.preventDefault();
+                    salvarAlteracoesUsuario(userId).then(() => {
+                        // Desabilita edição após salvar
+                        inputNome.disabled = true;
+                        inputEmail.disabled = true;
+                        btnEditar.style.display = "inline-block";
+                        btnSalvar.style.display = "none";
+                    });
+                });
+            }
+
+            const formAlterarSenha = document.getElementById("form-alterar-senha");
+            if (formAlterarSenha) {
+                formAlterarSenha.addEventListener("submit", function(e){
+                    e.preventDefault();
+                    salvarNovaSenha(userId);
+                });
+            }
+        });
+
+        async function carregarDadosUsuario(userId) {
+            try {
+                const userInfo = await API.get(`/user/info/${encodeURIComponent(userId)}`);
+                document.getElementById("nome").value = userInfo.nome || "";
+                document.getElementById("email").value = userInfo.email || "";
+            } catch (error) {
+                console.error("Erro ao carregar dados do usuário:", error);
+                UI.showMessage("Erro ao carregar dados do usuário.", "error");
+            }
+        }
+
+        async function salvarAlteracoesUsuario(userId) {
+            UI.clearFormErrors("form-alterar-usuario");
+
+            const nomeValid = UI.validateRequired("nome", "nome-error");
+            const emailValid = UI.validateRequired("email", "email-error");
+            if (!nomeValid || !emailValid) {
+                UI.showMessage("Por favor, preencha todos os campos.", "error");
+                return;
+            }
+
+            const dadosUsuarioAtualizados = {
+                nome: document.getElementById("nome").value.trim(),
+                email: document.getElementById("email").value.trim()
+            };
+
+            try {
+                await API.put(`/user/profile/${encodeURIComponent(userId)}`, dadosUsuarioAtualizados);
+                UI.showMessage("Perfil atualizado com sucesso!", "success");
+            } catch (error) {
+                console.error("Erro ao salvar alterações do perfil:", error);
+                UI.showMessage(error.message || "Erro ao salvar alterações do perfil.", "error");
+            }
+        }
+
+        async function salvarNovaSenha(userId) {
+            UI.clearFormErrors("form-alterar-senha");
+
+            const currentPassword = document.getElementById("current_password").value;
+            const newPassword = document.getElementById("new_password").value;
+            const confirmNewPassword = document.getElementById("confirm_new_password").value;
+
+            const currentPasswordValid = UI.validateRequired("current_password", "current_password-error");
+            const newPasswordValid = UI.validateRequired("new_password", "new_password-error");
+            const confirmNewPasswordValid = UI.validateRequired("confirm_new_password", "confirm_new_password-error");
+
+            if (!currentPasswordValid || !newPasswordValid || !confirmNewPasswordValid) {
+                UI.showMessage("Por favor, preencha todos os campos de senha.", "error");
+                return;
+            }
+
+            if (newPassword !== confirmNewPassword) {
+                UI.setFormError("confirm_new_password", "As novas senhas não coincidem.");
+                UI.showMessage("As novas senhas não coincidem.", "error");
+                return;
+            }
+
+            if (newPassword.length < 6) {
+                UI.setFormError("new_password", "A nova senha deve ter no mínimo 6 caracteres.");
+                UI.showMessage("A nova senha deve ter no mínimo 6 caracteres.", "error");
+                return;
+            }
+
+            const dadosSenhaAtualizados = {
+                senhaAtual: currentPassword,
+                novaSenha: newPassword
+            };
+
+            try {
+                await API.put(`/user/password/${encodeURIComponent(userId)}`, dadosSenhaAtualizados);
+                UI.showMessage("Senha alterada com sucesso!", "success");
+                document.getElementById("form-alterar-senha").reset();
+            } catch (error) {
+                console.error("Erro ao alterar senha:", error);
+                UI.showMessage(error.message || "Erro ao alterar senha. Tente novamente.", "error");
+            }
+        }
+    </script>
+</body>
+</html>

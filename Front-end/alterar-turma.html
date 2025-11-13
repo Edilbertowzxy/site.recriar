@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alterar Turma - Sistema Recriar</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="shortcut icon" href="logo.png" type="image/x-icon">
+  <script src="common.js" defer></script>
+</head>
+<body>
+  <div id="menu-container"></div>
+
+  <main>
+    <div class="container">
+      <h2>Alterar Turma</h2>
+      <div id="feedback-message" class="feedback-message" style="display:none;"></div>
+
+      <section class="card">
+        <header class="card-header">
+          <h3>Informações da Turma</h3>
+        </header>
+
+        <form id="form-alterar-turma" class="card-body grid-2">
+          <div class="form-group">
+            <label for="nome">Nome da Turma</label>
+            <input type="text" id="nome" name="nome" required>
+            <span id="nome-error" class="error-message"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="professor">Professor Responsável</label>
+            <select id="professor" name="professor" disabled>
+              <option value="">Carregando professores...</option>
+            </select>
+            <span id="professor-error" class="error-message"></span>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="descricao">Descrição</label>
+            <textarea id="descricao" name="descricao" rows="3"></textarea>
+            <span id="descricao-error" class="error-message"></span>
+          </div>
+
+          <div class="form-actions full-width">
+            <button type="button" id="btn-editar-salvar" class="btn-success">Editar</button>
+            <button type="button" class="btn-secondary" onclick="window.location.href='turmas.html'">Voltar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" style="margin-top:16px;">
+        <header class="card-header">
+          <h3>Alunos da Turma</h3>
+        </header>
+        <div class="card-body">
+          <div class="table-container">
+            <div class="crud-bar" style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
+              <select id="select-aluno" style="min-width:280px;">
+                <option>Carregando alunos...</option>
+              </select>
+              <button type="button" id="btn-adicionar-aluno" class="btn-success">Adicionar aluno</button>
+            </div>
+            <table class="table" id="tabela-alunos">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Matrícula</th>
+                  <th>Nome</th>
+                  <th>Idade</th>
+                  <th>Sexo</th>
+                  <th>Data Matrícula</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-alunos">
+                <!-- alunos carregados via JS -->
+              </tbody>
+            </table>
+
+            <div id="no-alunos-message" class="no-data-message" style="display:none; margin-top:8px;">
+              <p>Nenhum aluno encontrado nesta turma.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="menu.js" defer></script>
+  <script>
+    let currentTurmaId = null;
+    let isEditing = false;
+
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!Auth.requireAuth()) return;
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const turmaId = urlParams.get("id");
+      currentTurmaId = turmaId;
+
+      if (!turmaId) {
+        console.error("ID da turma não fornecido na URL.");
+        UI.showMessage("ID da turma não fornecido. Redirecionando para a página de turmas.", "error");
+        setTimeout(() => { window.location.href = "turmas.html"; }, 2000);
+        return;
+      }
+
+      // campos começam desabilitados (modo de visualização)
+      setFormEditable(false);
+
+      // carregar lista de professores para o select (para quando abrir edição)
+      carregarListaProfessores();
+
+      // carregar dados da turma
+      carregarDadosTurma(turmaId);
+
+      // controle do botão Editar/Salvar
+      const btnEditarSalvar = document.getElementById('btn-editar-salvar');
+      if (btnEditarSalvar) {
+        btnEditarSalvar.addEventListener('click', async function () {
+          if (!isEditing) {
+            // entrar em modo edição
+            isEditing = true;
+            setFormEditable(true);
+            btnEditarSalvar.textContent = 'Salvar';
+            btnEditarSalvar.classList.add('editing');
+            // focar no primeiro campo
+            document.getElementById('nome').focus();
+            return;
+          }
+
+          // já em edição -> salvar alterações
+          await salvarAlteracoesTurma(currentTurmaId);
+        });
+      }
+
+      // botão de adicionar aluno (delegado)
+      document.addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'btn-adicionar-aluno') {
+          adicionarAluno(currentTurmaId);
+        }
+      });
+    });
+
+    function setFormEditable(editable) {
+      isEditing = !!editable;
+      const nome = document.getElementById('nome');
+      const descricao = document.getElementById('descricao');
+      const professor = document.getElementById('professor');
+
+      if (nome) nome.disabled = !editable;
+      if (descricao) descricao.disabled = !editable;
+      if (professor) professor.disabled = !editable;
+    }
+
+    async function carregarDadosTurma(id) {
+      try {
+        // Chamar endpoint /turma/{id}/info conforme solicitado
+        const turma = await API.get(`/turma/${id}/info`);
+
+        if (!turma) {
+          throw new Error('Resposta vazia do servidor');
+        }
+
+        document.getElementById("nome").value = turma.nome || '';
+        document.getElementById("descricao").value = turma.descricao || '';
+
+        // Se a lista de professores já foi carregada, seleciona o professor atual
+        await ensureProfessoresLoaded();
+        if (turma.professor) {
+          // selecionar pelo nome (a API usa o nome como string)
+          const sel = document.getElementById('professor');
+          if (sel) {
+            const optionToSelect = Array.from(sel.options).find(o => o.value === turma.professor);
+            if (optionToSelect) optionToSelect.selected = true;
+            else {
+              // se o nome não estiver na lista, adicionar como opção para manter a informação
+              const opt = document.createElement('option');
+              opt.value = turma.professor;
+              opt.textContent = turma.professor;
+              sel.appendChild(opt);
+              opt.selected = true;
+            }
+          }
+        }
+
+        // Renderizar lista de alunos
+        renderAlunos(turma.alunos || []);
+
+        // Carregar lista de alunos disponíveis para adicionar (exclui os já presentes)
+        carregarAlunosDisponiveis(turma.alunos || []);
+
+      } catch (error) {
+        console.error("Erro ao carregar dados da turma:", error);
+        UI.showMessage("Não foi possível carregar os dados da turma.", "error");
+        setTimeout(() => { window.location.href = "turmas.html"; }, 2000);
+      }
+    }
+
+    // Carrega lista de professores e popula o select
+    let _professoresLoaded = false;
+    async function carregarListaProfessores() {
+      try {
+        const lista = await API.get('/professor/list');
+        const sel = document.getElementById('professor');
+        if (!sel) return;
+        sel.innerHTML = '';
+
+        if (!lista || lista.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Nenhum professor encontrado';
+          sel.appendChild(opt);
+          sel.disabled = true;
+          _professoresLoaded = true;
+          return;
+        }
+
+        lista.forEach(p => {
+          const opt = document.createElement('option');
+          // valor será o nome, porque a API espera nome como string
+          opt.value = p.nome || '';
+          opt.textContent = p.nome || p.email || ('Professor ' + (p.id || ''));
+          sel.appendChild(opt);
+        });
+
+        sel.disabled = true; // manter desabilitado até entrar em modo edição
+        _professoresLoaded = true;
+      } catch (err) {
+        console.error('Erro ao carregar professores:', err);
+        const sel = document.getElementById('professor');
+        if (sel) {
+          sel.innerHTML = '';
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Erro ao carregar professores';
+          sel.appendChild(opt);
+          sel.disabled = true;
+        }
+      }
+    }
+
+    async function ensureProfessoresLoaded() {
+      if (!_professoresLoaded) {
+        await carregarListaProfessores();
+      }
+    }
+
+    async function carregarAlunosDisponiveis(alunosDaTurma) {
+      try {
+        const todosAlunos = await API.get('/aluno/list');
+
+        const select = document.getElementById('select-aluno');
+        if (!select) return;
+
+        select.innerHTML = '';
+
+        // Criar um conjunto com ids já na turma para evitar duplicação
+        const existentes = new Set((alunosDaTurma || []).map(a => a.id));
+
+        if (!todosAlunos || todosAlunos.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Nenhum aluno disponível';
+          select.appendChild(opt);
+          select.disabled = true;
+          return;
+        }
+
+        let disponivelCount = 0;
+        todosAlunos.forEach(aluno => {
+          if (existentes.has(aluno.id)) return; // pular já presentes
+
+          const opt = document.createElement('option');
+          opt.value = aluno.id;
+          opt.textContent = `${aluno.matricula || ''} - ${aluno.nomeCompleto || ''}`;
+          select.appendChild(opt);
+          disponivelCount++;
+        });
+
+        if (disponivelCount === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Nenhum aluno disponível para adicionar';
+          select.appendChild(opt);
+          select.disabled = true;
+        } else {
+          select.disabled = false;
+        }
+
+      } catch (error) {
+        console.error('Erro ao carregar lista de alunos:', error);
+        UI.showMessage('Não foi possível carregar a lista de alunos disponíveis.', 'error');
+      }
+    }
+
+    async function adicionarAluno(turmaId) {
+      if (!turmaId) {
+        UI.showMessage('ID da turma inválido.', 'error');
+        return;
+      }
+
+      const select = document.getElementById('select-aluno');
+      if (!select || !select.value) {
+        UI.showMessage('Selecione um aluno para adicionar.', 'error');
+        return;
+      }
+
+      const alunoId = parseInt(select.value, 10);
+      if (!alunoId) {
+        UI.showMessage('Seleção inválida.', 'error');
+        return;
+      }
+
+      try {
+        // Enviar requisição para registrar aluno na turma
+        await API.post('/turma-aluno/register', { aluno_id: alunoId, turma_id: parseInt(turmaId, 10) });
+        UI.showMessage('Aluno adicionado à turma com sucesso!', 'success');
+
+        // Recarregar dados da turma para atualizar a tabela e o select
+        carregarDadosTurma(turmaId);
+      } catch (error) {
+        console.error('Erro ao adicionar aluno:', error);
+        UI.showMessage(error.message || 'Erro ao adicionar aluno à turma.', 'error');
+      }
+    }
+
+    function renderAlunos(alunos) {
+      const tbody = document.getElementById('tbody-alunos');
+      const noAlunosMessage = document.getElementById('no-alunos-message');
+      tbody.innerHTML = '';
+
+      if (!alunos || alunos.length === 0) {
+        noAlunosMessage.style.display = 'block';
+        return;
+      }
+
+      noAlunosMessage.style.display = 'none';
+
+      alunos.forEach(a => {
+        const row = document.createElement('tr');
+
+        const tdId = document.createElement('td');
+        tdId.textContent = a.id || '';
+        row.appendChild(tdId);
+
+        const tdMat = document.createElement('td');
+        tdMat.textContent = a.matricula || '';
+        row.appendChild(tdMat);
+
+        const tdNome = document.createElement('td');
+        tdNome.textContent = a.nomeCompleto || '';
+        row.appendChild(tdNome);
+
+        const tdIdade = document.createElement('td');
+        tdIdade.textContent = a.idade != null ? a.idade : '';
+        row.appendChild(tdIdade);
+
+        const tdSexo = document.createElement('td');
+        tdSexo.textContent = a.sexo || '';
+        row.appendChild(tdSexo);
+
+        const tdData = document.createElement('td');
+        tdData.textContent = Format.date(a.dataMatricula) || '';
+        row.appendChild(tdData);
+
+        // Coluna de Ações (Excluir aluno da turma)
+        const tdActions = document.createElement('td');
+        tdActions.className = 'actions';
+
+        const btnExcluir = document.createElement('button');
+        btnExcluir.type = 'button';
+        btnExcluir.textContent = 'Excluir';
+        // usar classes já existentes para aparecer em vermelho
+        btnExcluir.className = 'btn-action btn-danger';
+        btnExcluir.addEventListener('click', function () {
+          excluirAluno(currentTurmaId, a.id);
+        });
+
+        tdActions.appendChild(btnExcluir);
+        row.appendChild(tdActions);
+
+        tbody.appendChild(row);
+      });
+    }
+
+    async function salvarAlteracoesTurma(id) {
+      UI.clearFormErrors("form-alterar-turma");
+
+      const nomeValid = UI.validateRequired("nome", "nome-error");
+
+      if (!nomeValid) {
+        UI.showMessage("Por favor, preencha o nome da turma.", "error");
+        return;
+      }
+      const professorValue = document.getElementById('professor') ? document.getElementById('professor').value.trim() : '';
+
+      if (!professorValue) {
+        UI.showMessage('Por favor, selecione o professor respons e1vel.', 'error');
+        return;
+      }
+
+      const dadosTurmaAtualizados = {
+        nome: document.getElementById("nome").value.trim(),
+        professor: professorValue,
+        descricao: document.getElementById("descricao").value.trim()
+      };
+
+      try {
+        // Chamar endpoint de update conforme informado: /api/turma/update/{id}
+        await API.put(`/turma/update/${id}`, dadosTurmaAtualizados);
+        UI.showMessage("Turma alterada com sucesso!", "success");
+
+        // voltar para modo visualiza e7 e3o e recarregar dados atualizados
+        setFormEditable(false);
+        const btn = document.getElementById('btn-editar-salvar');
+        if (btn) {
+          btn.textContent = 'Editar';
+          btn.classList.remove('editing');
+        }
+
+        // Recarrega os dados atualizados
+        carregarDadosTurma(id);
+      } catch (error) {
+        console.error("Erro ao salvar alterações da turma:", error);
+        UI.showMessage(error.message || "Erro ao salvar altera e7 f5es da turma.", "error");
+      }
+    }
+
+    /**
+     * Remove um aluno de uma turma usando o endpoint DELETE
+     * Endpoint: /turma/{turma_id}/aluno/{aluno_id}
+     */
+    async function excluirAluno(turmaId, alunoId) {
+      if (!turmaId || !alunoId) {
+        UI.showMessage('ID da turma ou do aluno inválido.', 'error');
+        return;
+      }
+
+      try {
+        // Chama o endpoint DELETE com o caminho que você informou (/turma/turma/{id}/aluno/{id})
+        await API.delete(`/turma/turma/${turmaId}/aluno/${alunoId}`);
+        UI.showMessage('Aluno removido da turma com sucesso.', 'success');
+
+        // Recarregar os dados da turma para atualizar tabela e select
+        carregarDadosTurma(turmaId);
+      } catch (error) {
+        console.error('Erro ao remover aluno da turma:', error);
+        UI.showMessage(error.message || 'Erro ao remover aluno da turma.', 'error');
+      }
+    }
+  </script>
+</body>
+</html>
