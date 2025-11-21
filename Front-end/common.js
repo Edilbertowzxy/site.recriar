@@ -485,6 +485,39 @@ const Pagination = {
   }
 };
 
+// Utilitário para configurar favicon dinamicamente
+const FaviconManager = {
+  set(iconPath = 'logo.png') {
+    // Remove qualquer favicon existente
+    const existingFavicons = document.querySelectorAll('link[rel*="icon"]');
+    existingFavicons.forEach(link => link.remove());
+
+    // Cria novo elemento de favicon
+    const link = document.createElement('link');
+    link.rel = 'shortcut icon';
+    link.type = 'image/x-icon';
+    link.href = iconPath;
+    
+    // Adiciona ao head
+    document.head.appendChild(link);
+  }
+};
+
+// Configurar favicon automaticamente ao carregar a página
+document.addEventListener('DOMContentLoaded', () => {
+  FaviconManager.set('logo.png');
+});
+
+// Utilitário para debounce
+function debounce(func, delay) {
+    let timeout;
+    return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), delay);
+    };
+}
+
 // Exporta para uso global
 window.CONFIG = CONFIG;
 window.Auth = Auth;
@@ -493,4 +526,6 @@ window.Format = Format;
 window.API = API;
 window.Table = Table;
 window.Pagination = Pagination;
-
+window.FaviconManager = FaviconManager;
+window.debounce = debounce;
+window.debounce = debounce;
